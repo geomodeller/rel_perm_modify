@@ -92,7 +92,7 @@ def generate_dat_content(template_path, step):
     if step == 0:
         return ''.join(lines)  # step 0 is already completed
     else:
-        lines[1] = f'FILENAME SR3-IN datafile_step_{step - 1}.sr3\n'
+        lines[1] = f"FILENAME SR3-IN 'datafile_step_{step - 1}.sr3'\n"
         return ''.join(lines)
 
 
