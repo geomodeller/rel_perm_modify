@@ -23,7 +23,7 @@ BIN_SIZE   = 3.048           # m/day (= 10 ft/day per RPT bin)
 MAX_INNER  = 1              # max RPT convergence iterations per time step
 
 if platform.system() == "Windows":
-    _CMG_EXE = r'"C:\Program Files\CMG\GEM\2024.20\Win_x64\EXE\gm202420.exe"'
+    _CMG_EXE = r'C:\Program Files\CMG\GEM\2024.20\Win_x64\EXE\gm202420.exe'
 else:
     _CMG_EXE = "/mnt/c/Program Files/CMG/GEM/2024.20/Win_x64/EXE/gm202420.exe"
 
@@ -277,4 +277,5 @@ def main():
 
 
 if __name__ == '__main__':
+    print(f"CMG executable: {_CMG_EXE}")
     main()
