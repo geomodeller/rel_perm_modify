@@ -20,7 +20,7 @@ N_BLOCKS   = NX * NY * NZ   # 68628
 N_RPT      = 10
 BIN_SIZE   = 3.048           # m/day (= 10 ft/day per RPT bin)
 
-MAX_INNER  = 1              # max RPT convergence iterations per time step
+MAX_INNER  = 10              # max RPT convergence iterations per time step
 
 if platform.system() == "Windows":
     _CMG_EXE = r'C:\Program Files\CMG\GEM\2024.20\Win_x64\EXE\gm202420.exe'
@@ -203,21 +203,10 @@ def main():
             f.writelines(schedule_lines[:2*step+2])
 
         print(f'┌─ Step {step:2d} / {n_steps-1} ────────────────────────────────────────────────')
-        # # Save the start-of-step RST so inner loop can re-run from the same state
-        # if step > 0:
-        #     prev_rst  = rst_path(run_dir, step - 1)
-        #     saved_rst = start_rst_path(run_dir, step)
-        #     if not os.path.isfile(prev_rst):
-        #         sys.exit(f'ERROR: RST from step {step-1} not found: {prev_rst}\n'
-        #                  f'       Cannot restart step {step}.')
-        #     shutil.copy(prev_rst, saved_rst)
 
         # ── Inner RPT convergence loop ─────────────────────────────────────────
         for inner in range(args.max_inner):
 
-            # Restore start-of-step RST before each CMG run
-            # if step > 0:
-            #     shutil.copy(start_rst_path(run_dir, step), rst_path(run_dir, step))
 
             # Write current RTYPE
             if step == 0 and inner == 0:
@@ -255,11 +244,6 @@ def main():
 
         else:
             print(f'│  WARNING: did not converge within {args.max_inner} iterations')
-
-        # # Clean up temporary start RST
-        # sav = start_rst_path(run_dir, step)
-        # if os.path.isfile(sav):
-        #     os.remove(sav)
 
         # Print current RPT distribution
         counts = [int(np.sum(rtype == r)) for r in range(1, N_RPT + 1)]
