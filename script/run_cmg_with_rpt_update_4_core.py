@@ -145,7 +145,7 @@ def main():
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    p.add_argument('--run-dir',  default=os.path.join('runs', 'core_with-update'),
+    p.add_argument('--run-dir',  default=os.path.join('runs', 'core_homo_with-update'),
                    help='Directory containing template.dat and *.inc files (default: runs/core_with-update)')
     p.add_argument('--template', default='template.dat',
                    help='Template dat filename inside --run-dir (default: template.dat)')
