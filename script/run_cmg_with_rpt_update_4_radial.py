@@ -61,7 +61,7 @@ def write_rocktype_inc_initial(run_dir):
     """
     path = os.path.join(run_dir, 'rocktype.inc')
     lines = ['*RTYPE *ALL\n']
-    rtype_flat = [1]*N_BLOCKS  # Initialize all blocks to RPT 1
+    rtype_flat = [5]*N_BLOCKS  # Initialize all blocks to RPT 5
     for i in range(0, N_BLOCKS, 20):
         chunk = rtype_flat[i:i + 20]
         lines.append(' '.join(str(v) for v in chunk) + '\n')
