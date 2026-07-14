@@ -665,7 +665,9 @@ def get_grid(sr3):
     dy = size[1::3]
     dz = size[2::3]
 
-    # Get the number of Cartesian grid blocks
+    # Get the number of Cartesian grid blocks.
+    # The IGNT* tables hold one entry per grid: entry 0 is the fundamental
+    # grid; with local grid refinement (LGR) entries 1..n are the refined grids.
     Ni = int(sp['GRID/IGNTID'][0][0])
     Nj = int(sp['GRID/IGNTJD'][0][0])
     Nk = int(sp['GRID/IGNTKD'][0][0])
@@ -673,13 +675,20 @@ def get_grid(sr3):
     # sr3.grid.n_cells = Ni * Nj * Nk
     sr3.grid.grid_dim = sum(1 for n in sr3.grid.cart_dims if n > 1)
 
+    # With LGR, complete storage = fundamental cells followed by the refined
+    # (child) cells, so BLOCKDEPTH/BLOCKSIZE are longer than the fundamental
+    # grid; the fundamental grid always occupies the first n_fund entries.
+    n_fund = Ni * Nj * Nk
+    sr3.grid.n_fund_cells = n_fund
+    sr3.grid.n_grids = len(sp['GRID/IGNTID'][0])
+
     # Calculate the centroids and volumes
-    dx = np.reshape(dx, sr3.grid.cart_dims, order='F')
-    dy = np.reshape(dy, sr3.grid.cart_dims, order='F')
-    dz = np.reshape(dz, sr3.grid.cart_dims, order='F')
+    dx = np.reshape(dx[:n_fund], sr3.grid.cart_dims, order='F')
+    dy = np.reshape(dy[:n_fund], sr3.grid.cart_dims, order='F')
+    dz = np.reshape(dz[:n_fund], sr3.grid.cart_dims, order='F')
 
     # The depths are related to cell centers
-    d = np.reshape(depths, sr3.grid.cart_dims, order='F')
+    d = np.reshape(depths[:n_fund], sr3.grid.cart_dims, order='F')
     depthsf = d.flatten(order='F')
 
     # Cell centroids
@@ -788,5 +797,93 @@ def get_grid_properties(sr3: h5py.File, nx:int = 128, ny:int = 128, nz:int = 1, 
         if value.shape == (0,):
             key2remove.append(key)
     for key in key2remove:
-        del spatial_data[key]   
+        del spatial_data[key]
     return spatial_data
+
+
+def get_lgr_table(sr3):
+    """
+    Build the local-grid-refinement table from the SR3 GRID datasets.
+
+    Uses (verified against GEM 2024.20 output):
+      ICSTCG : per complete-storage cell, the number of the refined grid hosted
+               by that cell (0 if the cell is not a refined parent)
+      IGNTID/JD/KD : per-grid I/J/K dimensions (entry 0 = fundamental grid)
+      IGNTNC : cumulative cell counts; grid g occupies complete-storage slots
+               IGNTNC[g-1] .. IGNTNC[g]-1
+
+    Returns
+    -------
+    list of dict, one per refined grid, ordered as their cells appear in
+    complete storage (refined grids are created I-fastest, then J, then K
+    over the REFINE range):
+        {'grid'       : SR3 grid number (fundamental grid is 1),
+         'parent_ijk' : (i, j, k) 1-based fundamental address of the parent,
+         'dims'       : (ni, nj, nk) subdivision of the parent,
+         'start','stop': 0-based slice of this grid's cells in the CHILD
+                         section (i.e. relative to the end of the fundamental
+                         grid).  Child cells are stored local-I-fastest.}
+    Empty list if the SR3 has no refined grids.
+    """
+    if sr3.grid.n_grids <= 1:
+        return []
+
+    (_, sp) = get_spatial_properties(sr3, ['GRID/ICSTCG', 'GRID/IGNTID',
+                                           'GRID/IGNTJD', 'GRID/IGNTKD',
+                                           'GRID/IGNTNC'],
+                                     activeonly=False, verbose=False)
+    icstcg = np.asarray(sp['GRID/ICSTCG'][0]).astype(int)
+    gid    = np.asarray(sp['GRID/IGNTID'][0]).astype(int)
+    gjd    = np.asarray(sp['GRID/IGNTJD'][0]).astype(int)
+    gkd    = np.asarray(sp['GRID/IGNTKD'][0]).astype(int)
+    gnc    = np.asarray(sp['GRID/IGNTNC'][0]).astype(int)
+
+    Ni, Nj = gid[0], gjd[0]
+    n_fund = gnc[1]            # IGNTNC = [0, n_fund, end of grid 2, ...]
+
+    table = []
+    for h in np.where(icstcg > 0)[0]:
+        g = int(icstcg[h])                       # refined grid number (>= 2)
+        k, r = divmod(int(h), Ni * Nj)
+        j, i = divmod(r, Ni)
+        table.append({'grid':       g,
+                      'parent_ijk': (i + 1, j + 1, k + 1),
+                      'dims':       (int(gid[g-1]), int(gjd[g-1]), int(gkd[g-1])),
+                      'start':      int(gnc[g-1] - n_fund),
+                      'stop':       int(gnc[g]   - n_fund)})
+    table.sort(key=lambda rec: rec['start'])
+    return table
+
+
+def get_grid_properties_lgr(sr3: h5py.File, nx:int = 128, ny:int = 128, nz:int = 1, nt:int = 4):
+    """
+    LGR-aware version of get_grid_properties().
+
+    Returns the tuple (fund, children, lgr_table):
+
+    fund[name]     : (nt, nz, ny, nx) array over the fundamental grid, same
+                     layout as get_grid_properties().  Refined parent blocks
+                     keep their slot but are inactive (values are zero).
+    children[name] : (nt, n_child_cells) array over all refined-grid cells in
+                     complete-storage order.  Slice per parent block with
+                     lgr_table[m]['start']:['stop']; within a refined grid the
+                     cells are local-I-fastest (reshape to dims (nk, nj, ni)).
+    lgr_table      : see get_lgr_table().
+
+    On a SR3 without LGR, children is empty and fund equals
+    get_grid_properties().
+    """
+    list_of_properties = get_list_of_spatial_props(sr3)
+    _, spatial_data = get_spatial_properties(sr3, list_of_properties, verbose=False)
+
+    n_fund = nx * ny * nz
+    fund, children = {}, {}
+    for key, value in spatial_data.items():
+        value = np.asarray(value)
+        if value.ndim != 2 or value.shape[1] < n_fund:
+            continue                      # not a per-cell array
+        nt_actual = value.shape[0]
+        fund[key] = value[:, :n_fund].reshape(nt_actual, nz, ny, nx)
+        if value.shape[1] > n_fund:
+            children[key] = value[:, n_fund:]
+    return fund, children, get_lgr_table(sr3)

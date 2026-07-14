@@ -147,7 +147,68 @@ child-block perf rows**, total perforated length preserved exactly
   thickness (e.g., block (19,11,1)) — benign; null parents are skipped.
 - The 20:1 size jump at the LGR boundary is legal but numerically abrupt; if
   convergence suffers, use nested refinement (100 → 20 → 5 m) or shrink `INTO`.
-- Post-processing scripts that read grid arrays as `(NX, NY, NZ)` from the SR3
-  (e.g., `script/sr3_reader.py` / the RPT-update scripts) only see the
-  fundamental grid; refined-block values need extra handling if you want to
-  use velocities from inside the LGR.
+- ~~Post-processing scripts that read grid arrays as `(NX, NY, NZ)` from the SR3
+  only see the fundamental grid.~~ Resolved — see §6: `sr3_reader.py` is now
+  LGR-aware.
+
+## 6. Reading refined-grid results from the SR3 (verified layout)
+
+A short LGR test run (GEM 2024.20) was used to decode how the SR3 stores
+refined grids. Layout, all verified empirically:
+
+- **Complete storage** = fundamental cells first (68,628, natural I-fastest
+  order — refined parents keep their slot but become inactive), then all child
+  cells appended (172 grids × 400 = 68,800 → 137,428 total).
+- **Refined grids are created I-fastest, then J, then K** over the `REFINE`
+  range: (19,11,1), (20,11,1), (19,12,1), (20,12,1), (19,11,2), … , (20,12,43).
+- **Within a refined grid, children are stored local-I-fastest** (confirmed by
+  matching child depth gradients against the fundamental structural dip) —
+  the same ordering `*RG ... *ALL` expects on input.
+- The mapping lives in the SR3 `GRID` datasets: `ICSTCG` (per cell, the number
+  of the refined grid it hosts; 0 = none), `IGNTID/JD/KD` (per-grid dims),
+  `IGNTNC` (cumulative cell counts → each grid's slice of complete storage),
+  `ICSTPS` (complete → packed/active mapping, used to unpack property arrays).
+- Every grid property in `OUTSRF GRID` (PRES, SG, VELOCRC, …) is written for
+  child cells too; per-perforation well rates appear in
+  `TimeSeries/LAYERS` (75 layers = the 75 child-block perfs).
+
+### sr3_reader.py support
+
+- `get_grid()` was fixed to slice geometry arrays to the fundamental grid
+  (it crashed on LGR SR3s before) and now sets `sr3.grid.n_grids` /
+  `sr3.grid.n_fund_cells`.
+- **`get_lgr_table(sr3)`** → one record per refined grid:
+  `{'grid', 'parent_ijk', 'dims', 'start', 'stop'}` where start/stop slice the
+  child section of complete storage.
+- **`get_grid_properties_lgr(sr3, NX, NY, NZ, nt)`** → `(fund, children,
+  lgr_table)`: `fund[name]` is the usual `(nt, NZ, NY, NX)` array;
+  `children[name]` is `(nt, n_child_cells)` — slice with
+  `lgr_table[m]['start']:['stop']` and reshape `(20, 20)` (local j, local i)
+  for one parent. Backward compatible: on a non-LGR SR3, `children` is empty
+  and `fund` matches `get_grid_properties()` exactly.
+
+Example — CO2 gas velocity magnitude in the 5 m cells at the last time step:
+
+```python
+sr3 = read_SR3('datafile.sr3')
+nt  = len(sr3.times['Days'])
+fund, ch, tab = get_grid_properties_lgr(sr3, 38, 42, 43, nt)
+vel = np.sqrt(ch['VELGXRC'][-1]**2 + ch['VELGYRC'][-1]**2 + ch['VELGZRC'][-1]**2)
+rec = next(r for r in tab if r['parent_ijk'] == (19, 12, 8))
+vel_parent = vel[rec['start']:rec['stop']].reshape(20, 20)   # [local j, local i]
+```
+
+(Sanity check from the test run: max child velocity 24.6 m/day lands in parent
+(19,12,8) child (10,11) — directly beside the well child (11,11).)
+
+## 7. RPT-update workflow with LGR
+
+- **`runs/field_porthos_with-update_lgr/`** = `runs/field_porthos_with-update/`
+  + the `REFINE` line in `template.dat` + the child-UBA `well_config.inc`.
+- **`script/run_cmg_with_rpt_update_4_field_lgr.py`** runs it: same monthly
+  restart loop as the field script (30 RPT bins of 1.016 m/day, `**$`
+  placeholder activation), but velocities are read for fundamental + child
+  cells, and `rocktype.inc` is written as `*RTYPE *ALL` (fundamental) followed
+  by one `*RTYPE *RG i j k *ALL` block per refined parent (400 values,
+  local-I-fastest — the SR3 child order can be written back verbatim).
+  A full RG-style `rocktype.inc` (172 blocks) passed `-checkonly` cleanly.
