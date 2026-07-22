@@ -497,7 +497,11 @@ def list_timeseries_properties(sr3):
     return prop_name
 
 
-def get_spatial_properties(sr3: RawHDF, sel_names: list[str], activeonly: bool = True, verbose:bool=True, reshape:list = None):
+def get_spatial_properties(sr3: RawHDF, 
+                           sel_names: list[str], 
+                           activeonly: bool = True, 
+                           verbose:bool=True, 
+                           reshape:list = None):
     """
     Returns the tuple (sp_ind, sp), where sp is a dict of the time-dependent spatial properties with names, specified
     in sel_names, and sp_ind is a list of indices of corresponding time instants in sr3.times.
@@ -536,9 +540,12 @@ def get_spatial_properties(sr3: RawHDF, sel_names: list[str], activeonly: bool =
                     # an invalid dates
                     if i not in sp_ind:
                         #sp_ind.append(i)
-                        vi = sr3.valid_dates_ind[i]
-                        if vi != -1:
-                            sp_ind.append(vi)
+                        try:
+                            vi = sr3.valid_dates_ind[i]
+                            if vi != -1:
+                                sp_ind.append(vi)
+                        except IndexError:
+                            pass
 
                     # Accumulate the spatial distribution at the current time step
                     prop.append(sr3.data[key])
@@ -873,6 +880,7 @@ def get_grid_properties_lgr(sr3: h5py.File, nx:int = 128, ny:int = 128, nz:int =
     On a SR3 without LGR, children is empty and fund equals
     get_grid_properties().
     """
+    print('hi')
     list_of_properties = get_list_of_spatial_props(sr3)
     _, spatial_data = get_spatial_properties(sr3, list_of_properties, verbose=False)
 
